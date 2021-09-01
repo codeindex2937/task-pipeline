@@ -1,15 +1,15 @@
-from pipeline.service import ServiceManager
-from pipeline.system import System
-from stock.service import MessageService, DbService
-from stock.worker import CounterSingleStockFetcher, CounterSingleForeignFetcher, \
+from ..pipeline.service import ServiceManager
+from ..pipeline.system import System
+from .service import MessageService, DbService
+from .worker import CounterSingleStockFetcher, CounterSingleForeignFetcher, \
 					SingleForeignFetcher, SingleStockFetcher, DateGenerator, ConsoleWriter
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 
 db_cnofig = {
-	'db_path': 'stock\\stock.db',
-	'analyze_db_path': 'stock\\analyze.db'
+	'db_path': 'stock.db',
+	'analyze_db_path': 'analyze.db'
 }
 fetcher_config = {
 	'db': 'db',

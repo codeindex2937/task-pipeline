@@ -1,5 +1,5 @@
-from pipeline.parallel import SimpleWorker
-from pipeline.service import ServiceManager
+from ..pipeline.parallel import SimpleWorker
+from ..pipeline.service import ServiceManager
 from datetime import timedelta, datetime, date as date_type
 from io import StringIO
 import re

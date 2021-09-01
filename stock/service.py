@@ -1,6 +1,6 @@
-from pipeline.service import ServiceWorker
-from utils.db import OrmDatabase
-from utils.tui import TextUserInterface
+from ..pipeline.service import ServiceWorker
+from ..utils.db import OrmDatabase
+from ..utils.tui import TextUserInterface
 import sys
 import traceback
 from sqlalchemy import func, select, or_
