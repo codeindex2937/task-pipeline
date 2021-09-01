@@ -8,28 +8,6 @@ from sqlalchemy import func, select, or_
 class DB(OrmDatabase):
 	def __init__(self):
 		super(DB, self).__init__({
-		'group_type': {
-			'columns': [
-				{ 'name': 'name', 'type': 'TEXT', 'attr': { 'unique': True } },
-			]
-		},
-		'group': {
-			'columns': [
-				{ 'name': 'name',          'type': 'TEXT',    'attr': { 'unique': True, 'nullable': True } },
-				{ 'name': 'group_type_id', 'type': 'INTEGER', 'attr': {} },
-			]
-		},
-		'group_stock_relation': {
-			'columns': [
-				{ 'name': 'group_id', 'type': 'INTEGER', 'attr': { 'primary_key': True } },
-				{ 'name': 'stock_id', 'type': 'TEXT'   , 'attr': { 'primary_key': True } },
-			]
-		},
-		'stock_level': {
-			'columns': [
-				{ 'name': 'name', 'type': 'TEXT', 'attr': { 'unique': True } },
-			]
-		},
 		'stock': {
 			'columns': [
 				{ 'name': 'id',       'type': 'TEXT',    'attr': { 'primary_key': True, 'unique': True} },
@@ -91,23 +69,11 @@ class DB(OrmDatabase):
 	def insert_invester(self, attr):
 		return self.insert('invester', attr)
 
-	def relate_group_stock(self, group_id, stock_id):
-		return self.insert('group_stock_relation', {
-			'group_id': group_id,
-			'stock_id': stock_id,
-			})
-
 	def get_stock(self, attr):
 		return self.fetchone('stock', attr)
 
 	def get_trade(self, attr):
 		return self.fetchone('trade', attr)
-
-	def get_group_type(self, attr):
-		return self.fetchone('group_type', attr)
-
-	def get_group(self, attr):
-		return self.fetchone('group', attr)
 
 	def list_stock(self, attr=dict()):
 		return self.fetchall('stock', attr)
@@ -118,9 +84,6 @@ class DB(OrmDatabase):
 
 	def list_trade(self, attr=dict(), extra=None):
 		return self.fetchall('trade', attr, order_by=self.record.trade.date.asc(), extra=extra)
-
-	def list_stock_level(self, attr=dict()):
-		return self.fetchall('stock_level', attr)
 
 	def list_invester(self, attr=dict(), extra=None):
 		return self.fetchall('invester', attr, order_by=self.record.invester.date.asc(), extra=extra)
@@ -163,24 +126,6 @@ class DB(OrmDatabase):
 		result = self.session.execute(stmt)
 		return result.fetchall()
 
-	def list_stock_with_groups(self):
-		q = self.session.query(self.record.stock.id, self.record.stock.name, self.record.group.name) \
-			.select_from(
-				self.table_dict['stock'].join(self.table_dict['group_stock_relation'], self.record.group_stock_relation.stock_id==self.record.stock.id, isouter=True) \
-				.join(self.table_dict['group'], self.record.group_stock_relation.group_id==self.record.group.id, isouter=True)
-			)
-
-		result = {}
-		for r in q.all():
-			result.setdefault(r[0], {
-				'stock_id': r[0],
-				'stock_name': r[1],
-				'group': []
-			})
-			if r[2]:
-				result[r[0]]['group'].append(r[2])
-		return list(result.values())
-
 class AnalyzeDB(OrmDatabase):
 	def __init__(self):
 		super(AnalyzeDB, self).__init__({
@@ -204,7 +149,6 @@ class AnalyzeDB(OrmDatabase):
 
 		subq = self.session.query(self.record.stock_tag.stock_id) \
 			.filter(filters).subquery()
-			# .join(self.record.tag, self.record.tag.tag_id==self.record.stock_tag.tag_id) \
 		q = self.session.query(self.record.stock_tag.stock_id, self.record.tag.tag, self.record.tag.parent_tag) \
 			.join(self.record.tag, self.record.tag.tag_id==self.record.stock_tag.tag_id) \
 			.filter(self.record.stock_tag.stock_id.in_(subq))
@@ -239,7 +183,7 @@ class AnalyzeDB(OrmDatabase):
 		self.session.commit()
 
 	def list_tag(self):
-		parent_filter = or_((self.record.tag.parent_tag==9), (self.record.tag.parent_tag==281), (self.record.tag.parent_tag==None))
+		parent_filter = or_((self.record.tag.parent_tag==1), (self.record.tag.parent_tag==2), (self.record.tag.parent_tag==None))
 		q = self.session.query(self.record.tag.tag_id, self.record.tag.tag, self.record.tag.parent_tag) \
 			.filter(parent_filter) \
 			.filter((self.record.tag.tag != '概念股') & (self.record.tag.tag != '上市') & (self.record.tag.tag != '上櫃') & (self.record.tag.tag != '電子產業'))
@@ -332,8 +276,6 @@ class DbService(ServiceWorker):
 			return self.request(['insert_stock', attr], no_wait=False)
 		def list_stock(self, attr=dict()):
 			return self.request(['list_stock', attr], no_wait=False)
-		def list_stock_with_groups(self):
-			return self.request(['list_stock_with_groups'], no_wait=False)
 		def list_last_trade(self, attr=dict()):
 			return self.request(['list_last_trade', attr], no_wait=False)
 		def list_trade(self, attr=dict(), extra=None):
