@@ -111,8 +111,8 @@ def ensureInt(text):
 	return int(text.replace(',', ''))
 
 def parseTrades(source, db, total_store = None):
-	stock_list = db.list_stock_with_groups()
-	stock_name_map = {stock['stock_name']: stock['stock_id'] for stock in stock_list}
+	stock_list = db.list_stock()
+	stock_name_map = {stock['name']: stock['id'] for stock in stock_list}
 	store_map = {}
 	total_store = Store()
 
