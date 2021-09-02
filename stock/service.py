@@ -3,6 +3,7 @@ from ..utils.db import OrmDatabase
 from ..utils.tui import TextUserInterface
 import sys
 import traceback
+import math
 from sqlalchemy import func, select, or_
 
 class DB(OrmDatabase):
@@ -162,7 +163,7 @@ class AnalyzeDB(OrmDatabase):
 			result[r[0]]['tags'].add((r[1],r[2]))
 		return [{
 				'stock_id': v['stock_id'],
-				'tags': [t[0] for t in sorted(v['tags'], key=lambda t: 0 if t[1] is None else t[1], reverse=True)]
+				'tags': [t[0] for t in sorted(v['tags'], key=lambda t: math.inf if t[1] is None else t[1])]
 			} for v in result.values()]
 
 	def set_tag(self, stock_id, symbol):
