@@ -1,5 +1,7 @@
 from ..pipeline.parallel import SimpleWorker
 from ..pipeline.service import ServiceManager
+from .service import DB
+
 from datetime import timedelta, datetime, date as date_type
 from io import StringIO
 import re
@@ -54,6 +56,8 @@ class Store:
 
 def parseInt(s):
 	try:
+		if not isinstance(s, str):
+			return s
 		return int(s.replace(',', ''))
 	except:
 		return None
@@ -178,53 +182,161 @@ class SingleStockFetcher(SimpleWorker):
 		self.tui = ServiceManager.get('message')
 		self.db = ServiceManager.get(self.config["db"])
 
-	def process(self, date):
+	def fetchIndex(self, date):
 		datestr = date.strftime('%Y%m%d')
-		df = pandas.DataFrame()
 		self.tui.progress('fetching trade at %s' % (datestr))
 		r = requests.post('http://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&type=ALL&date=' + datestr)
 		self.tui.done()
+
 		if not r.text:
 			print('no data')
-		else:
-			try:
-				self.tui.progress('transforming')
-				rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if not i.startswith('="') and i.count('",') == 16]
-				df = pandas.read_csv(StringIO("\n".join(rows)), header=0)
-				self.tui.done()
+			return {}
 
-				self.tui.progress('insert stock')
-				self.db.insert_stock([{'id': row[1], 'name': row[2], 'level_id': 1} for row in df.itertuples()])
-				self.tui.done()
+		self.tui.progress('transforming')
+		rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if not i.startswith('="') and i.count('",') == 16]
+		df = pandas.read_csv(StringIO("\n".join(rows)), header=0)
+		self.tui.done()
 
-				self.tui.progress('insert trade')
-				self.db.insert_trade([{
-						'stock_id': row[1],
-						'date': date,
-						'share_amount': parseInt(row[3]),
-						'transaction_amount': parseInt(row[4]),
-						'turnover': parseInt(row[5]),
-						'open_price': parseFloat(row[6]),
-						'highest_price': parseFloat(row[7]),
-						'lowest_price': parseFloat(row[8]),
-						'close_price': parseFloat(row[9]),
-						'ud': '' if type(row[10]) == float and numpy.isnan(row[10]) else row[10],
-						'ud_amount': parseFloat(row[11]),
-						'last_purchase_price': parseFloat(row[12]),
-						'last_purchase_amount': parseInt(row[13]),
-						'last_sell_price': parseFloat(row[14]),
-						'last_sell_amount': parseInt(row[15]),
-						'pe_ratio': parseFloat(row[16]),
-					} for row in df.itertuples()])
+		self.tui.progress('insert stock')
+		self.db.insert_stock([{'id': row[1], 'name': row[2], 'level_id': 1} for row in df.itertuples()])
+		self.tui.done()
 
-			except Exception as e:
-				print(e)
-				df.to_csv('%s.csv' % (datestr))
-				# with open('%s.csv' % (datestr), 'w') as f:
-				# 	f.write(r.text)
+		return {
+			str(row[1]): {
+				'date': date,
+				'stock_id': str(row[1]),
+				'share_amount': parseInt(row[3]),
+				'transaction_amount': parseInt(row[4]),
+				'turnover': parseInt(row[5]),
+				'open_price': parseFloat(row[6]),
+				'highest_price': parseFloat(row[7]),
+				'lowest_price': parseFloat(row[8]),
+				'close_price': parseFloat(row[9]),
+				'ud': '' if type(row[10]) == float and numpy.isnan(row[10]) else row[10],
+				'ud_amount': parseFloat(row[11]),
+				'last_purchase_price': parseFloat(row[12]),
+				'last_purchase_amount': parseInt(row[13]),
+				'last_sell_price': parseFloat(row[14]),
+				'last_sell_amount': parseInt(row[15]),
+				'pe_ratio': parseFloat(row[16]),
+			}
+		for row in df.itertuples()}
+
+	def fetchMargin(self, date):
+		datestr = date.strftime('%Y%m%d')	
+		r = requests.post('https://www.twse.com.tw/exchangeReport/MI_MARGN?response=csv&selectType=ALL&date=' + datestr)
+
+		if not r.text:
+		    print('no data')
+		    return {}
+
+		self.tui.progress('transforming')
+		rows = [i for i in r.text.split('\n') if not i.startswith('="') and i.count('",') == 16]
+		df = pandas.read_csv(StringIO("\n".join(rows)), header=1, na_filter=False)
+		self.tui.done()
+
+		return {
+			str(row[1]): {
+				"date": date,
+				"stock_id": str(row[1]),
+				"margin_purchase_buy": parseInt(row[3]),
+				"margin_purchase_sell": parseInt(row[4]),
+				"margin_purchase_cash_repayment": parseInt(row[5]),
+				"margin_purchase_yesterday_balance": parseInt(row[6]),
+				"margin_purchase_today_balance": parseInt(row[7]),
+				"margin_purchase_limit": parseInt(row[8]),
+				"short_sale_buy": parseInt(row[9]),
+				"short_sale_sell": parseInt(row[10]),
+				"short_sale_cash_repayment": parseInt(row[11]),
+				"short_sale_yesterday_balance": parseInt(row[12]),
+				"short_sale_today_balance": parseInt(row[13]),
+				"short_sale_limit": parseInt(row[14]),
+				"offset_loan_and_short": parseInt(row[15]),
+				"note": row[16],
+			}
+		for row in df.itertuples()}
+
+	def fetchForeign(self, date):
+		datestr = date.strftime('%Y%m%d')
+		self.tui.progress('fetching foreign at %s' % (datestr))
+		r = requests.post('http://www.twse.com.tw/fund/MI_QFIIS?response=csv&selectType=ALLBUT0999&date=' + datestr)
+		self.tui.done()
+
+		if not r.text:
+			print('no data')
+			return
+
+		self.tui.progress('transforming')
+		rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if not i.startswith('="') and (i.count('",') in (11, 12))]
+		df = pandas.read_csv(StringIO("\n".join(rows)), header=1, na_filter=False)
+		self.tui.done()
+
+		if df.empty:
+			return {}
+
+		return {
+			str(row[1]): {
+				'date': date,
+				'stock_id': str(row[1]),
+				'total_stock': parseInt(row[4]),
+				'valid_remain_for_foreign': parseInt(row[5]),
+				'hold_by_foreign': parseInt(row[6]),
+				'valid_remain_for_foreign_percent': parseFloat(row[7]),
+				'hold_by_foreign_percent': parseFloat(row[8]),
+				'hold_by_foreign_percent_max': parseFloat(row[9]),
+				'hold_by_china_percent_max': parseFloat(row[10]) if len(row) == 14 else parseFloat(row[9]),
+				'update_reason': row[11] if len(row) == 14 else row[10],
+				'update_date': parseTaiwanDate(row[12]) if len(row) == 14 else parseTaiwanDate(row[11]),
+			} for row in df.itertuples()
+		}
+
+	def process(self, date):
+		try:
+			indexMap = self.fetchIndex(date)
+			if indexMap is None:
 				return
 
+			for stockId, indexInfo in indexMap.items():
+				indexMap[stockId].update({c.name: None for c in DB.Trade.columns if c.name not in indexInfo})
+
+			for i in range(self.config["fetch_interval"]):
+				if not self.running:
+					return
+				self.tui.progress('sleeping', i, self.config["fetch_interval"])
+				time.sleep(1)
+
+			marginMap = self.fetchMargin(date)
+			for stockId, marginInfo in marginMap.items():
+				if stockId not in indexMap:
+					print('no matching stock id: {}'.format(stockId,))
+					continue
+				indexMap[stockId].update(marginInfo)
+
+			for i in range(self.config["fetch_interval"]):
+				if not self.running:
+					return
+				self.tui.progress('sleeping', i, self.config["fetch_interval"])
+				time.sleep(1)
+
+			foreignMap = self.fetchForeign(date)
+			for stockId, foreignInfo in foreignMap.items():
+				if stockId not in indexMap:
+					print('no matching stock id: {}'.format(stockId,))
+					continue
+				indexMap[stockId].update(foreignInfo)
+
+			self.tui.progress('insert trade')
+			self.db.insert_trade([info for info in indexMap.values()])
+			self.tui.done()
+
+		except Exception as e:
+			print(e)
+			# with open('%s.csv' % (datestr), 'w') as f:
+			# 	f.write(r.text)
+
 		for i in range(self.config["fetch_interval"]):
+			if not self.running:
+				return
 			self.tui.progress('sleeping', i, self.config["fetch_interval"])
 			time.sleep(1)
 
@@ -234,176 +346,192 @@ class CounterSingleStockFetcher(SimpleWorker):
 		self.tui = ServiceManager.get('message')
 		self.db = ServiceManager.get(self.config["db"])
 
-	def process(self, date):
+	def fetchIndex(self, date):
 		datestr = '/'.join('%02d' % (s,) for s in [date.year - 1911, date.month, date.day])
-		df = pandas.DataFrame()
 		self.tui.progress('fetching counter trade at %s' % (datestr))
 		stock_re = re.compile(r'"\d{4}"')
 		r = requests.post('http://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_download.php?l=zh-tw&s=0,asc,0&d=' + datestr)
 		self.tui.done()
+
 		if not r.text:
 			print('no data')
+			return
+
+		self.tui.progress('transforming')
+		if date > datetime.combine(date_type(2020, 4, 28), datetime.min.time()):
+			rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if stock_re.match(i) and i.count('",') == 18]
+			last_sell_price_index = 14
 		else:
-			try:
-				self.tui.progress('transforming')
-				if date > datetime.combine(date_type(2020, 4, 28), datetime.min.time()):
-					rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if stock_re.match(i) and i.count('",') == 18]
-					last_sell_price_index = 14
-				else:
-					rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if stock_re.match(i) and i.count('",') == 16]
-					last_sell_price_index = 13
+			rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if stock_re.match(i) and i.count('",') == 16]
+			last_sell_price_index = 13
+		self.tui.done()
 
-				if not rows:
-					with open('{}.csv'.format(date.strftime('%Y%m%d')), 'w', encoding='utf-8') as f:
-						f.write(r.text)
-				else:
-					df = pandas.read_csv(StringIO("\n".join(rows)), header=0)
-					self.tui.done()
+		if not rows:
+			with open('{}.csv'.format(date.strftime('%Y%m%d')), 'w', encoding='utf-8') as f:
+				f.write(r.text)
+			return
 
-					self.tui.progress('insert stock')
-					self.db.insert_stock([{'id': row[1], 'name': row[2], 'level_id': 2} for row in df.itertuples()])
-					self.tui.done()
+		df = pandas.read_csv(StringIO("\n".join(rows)), header=0)
 
-					self.tui.progress('insert trade')
-					self.db.insert_trade([{
-								'stock_id': row[1],
-								'date': date,
-								'share_amount': parseInt(row[9]),
-								'transaction_amount': parseInt(row[11]),
-								'turnover': parseInt(row[10]),
-								'open_price': parseFloat(row[5]),
-								'highest_price': parseFloat(row[6]),
-								'lowest_price': parseFloat(row[7]),
-								'close_price': parseFloat(row[3]),
-								'ud': convertUD(parseFloat(row[4])),
-								'ud_amount': parseFloat2(row[4]),
-								'last_purchase_price': parseFloat(row[12]),
-								'last_purchase_amount': 1,
-								'last_sell_price': parseFloat(row[last_sell_price_index]),
-								'last_sell_amount': 1,
-								'pe_ratio': 0,
-							} for row in df.itertuples()])
+		self.tui.progress('insert stock')
+		self.db.insert_stock([{'id': row[1], 'name': row[2], 'level_id': 2} for row in df.itertuples()])
+		self.tui.done()
 
-			except Exception as e:
-				print(e)
-				df.to_csv('%s.csv' % (datestr))
-				# with open('%s.csv' % (datestr), 'w') as f:
-				# 	f.write(r.text)
-				return
+		return {
+			str(row[1]): {
+				'date': date,
+				'stock_id': row[1],
+				'share_amount': parseInt(row[9]),
+				'transaction_amount': parseInt(row[11]),
+				'turnover': parseInt(row[10]),
+				'open_price': parseFloat(row[5]),
+				'highest_price': parseFloat(row[6]),
+				'lowest_price': parseFloat(row[7]),
+				'close_price': parseFloat(row[3]),
+				'ud': convertUD(parseFloat(row[4])),
+				'ud_amount': parseFloat2(row[4]),
+				'last_purchase_price': parseFloat(row[12]),
+				'last_purchase_amount': 1,
+				'last_sell_price': parseFloat(row[last_sell_price_index]),
+				'last_sell_amount': 1,
+				'pe_ratio': 0,
+			} for row in df.itertuples()
+		}
 
-		for i in range(self.config["fetch_interval"]):
-			self.tui.progress('sleeping', i, self.config["fetch_interval"])
-			time.sleep(1)
-
-class CounterSingleForeignFetcher(SimpleWorker):
-	def __init__(self, pipe, config):
-		super(CounterSingleForeignFetcher, self).__init__(pipe, config)
-		self.tui = ServiceManager.get('message')
-		self.db = ServiceManager.get(self.config["db"])
-
-	def process(self, date):
+	def fetchForeign(self, date):
 		datestr = '/'.join('%02d' % (s,) for s in [date.year - 1911, date.month, date.day])
 		stock_re = re.compile(r'"\d+","\d{4}"')
-		df = pandas.DataFrame()
+
 		self.tui.progress('fetching counter foreign at %s' % (datestr))
 		r = requests.post('https://www.tpex.org.tw/web/stock/3insti/qfii/qfii_result.php?l=zh-tw&s=0,asc,0&o=csv&d=' + datestr)
 		self.tui.done()
+
 		if not r.text:
 			print('no data')
-		else:
-			try:
-				self.tui.progress('transforming')
-				rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if stock_re.match(i) and (i.count('",') == 9)]
+			return
 
-				if rows:
-					df = pandas.read_csv(StringIO("\n".join(rows)), header=1, na_filter=False)
-					self.tui.done()
+		self.tui.progress('transforming')
+		rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if stock_re.match(i) and (i.count('",') == 9)]
+		self.tui.done()
 
-					if not df.empty:
-						self.tui.progress('insert stock')
-						self.db.insert_stock([{'id': row[1], 'name': row[2], 'level_id': 2} for row in df.itertuples()])
-						self.tui.done()
+		if not rows:
+			return {}
 
-						self.tui.progress('insert invester')
-						self.db.insert_invester([{
-							'stock_id': row[2],
-							'date': date,
-							'total_stock': parseInt(row[4]),
-							'valid_remain_for_foreign': parseInt(row[5]),
-							'hold_by_foreign': parseInt(row[6]),
-							'valid_remain_for_foreign_percent': parseFloat(row[7]),
-							'hold_by_foreign_percent': parseFloat(row[8]),
-							'hold_by_foreign_percent_max': parseFloat(row[9]),
-							'hold_by_china_percent_max': parseFloat(row[9]),
-							'update_reason': '',
-							'update_date': datetime(2008, 1, 1),
-						} for row in df.itertuples()])
+		df = pandas.read_csv(StringIO("\n".join(rows)), header=1, na_filter=False)
 
-			except Exception as e:
-				print(e)
-				df.to_csv('%s.csv' % (datestr))
-				# with open('%s.csv' % (datestr), 'w') as f:
-				# 	f.write(r.text)
-				return
+		if df.empty:
+			return {}
 
-		for i in range(self.config["fetch_interval"]):
-			if not self.running:
-				break
-			self.tui.progress('sleeping', i, self.config["fetch_interval"])
-			time.sleep(1)
+		self.tui.progress('insert stock')
+		self.db.insert_stock([{'id': row[1], 'name': row[2], 'level_id': 2} for row in df.itertuples()])
+		self.tui.done()
 
-class SingleForeignFetcher(SimpleWorker):
-	def __init__(self, pipe, config):
-		super(SingleForeignFetcher, self).__init__(pipe, config)
-		self.tui = ServiceManager.get('message')
-		self.db = ServiceManager.get(self.config["db"])
+		return {
+			str(row[2]): {
+				'stock_id': row[2],
+				'date': date,
+				'total_stock': parseInt(row[4]),
+				'valid_remain_for_foreign': parseInt(row[5]),
+				'hold_by_foreign': parseInt(row[6]),
+				'valid_remain_for_foreign_percent': parseFloat(row[7]),
+				'hold_by_foreign_percent': parseFloat(row[8]),
+				'hold_by_foreign_percent_max': parseFloat(row[9]),
+				'hold_by_china_percent_max': parseFloat(row[9]),
+				'update_reason': '',
+				'update_date': datetime(2008, 1, 1),
+			} for row in df.itertuples()
+		}
+
+	def fetchMargin(self, date):
+		datestr = '/'.join('%02d' % (s,) for s in [date.year - 1911, date.month, date.day])
+		stock_re = re.compile(r'"\d{4}"')
+
+		self.tui.progress('fetching counter margin at %s' % (datestr))
+		r = requests.post('https://www.tpex.org.tw/web/stock/margin_trading/margin_balance/margin_bal_result.php?l=zh-tw&o=csv&s=0,asc&d=' + datestr)
+		self.tui.done()
+
+		if not r.text:
+			print('no data')
+			return
+
+		self.tui.progress('transforming')
+		rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if stock_re.match(i) and i.count('",') == 19]
+		self.tui.done()
+
+		if not rows:
+			return {}
+
+		df = pandas.read_csv(StringIO("\n".join(rows)), header=1, na_filter=False)
+		if df.empty:
+			return {}
+
+		return {
+			str(row[1]): {
+				"date": date,
+				"stock_id": str(row[1]),
+				"margin_purchase_buy": parseInt(row[4]),
+				"margin_purchase_sell": parseInt(row[5]),
+				"margin_purchase_cash_repayment": parseInt(row[6]),
+				"margin_purchase_yesterday_balance": parseInt(row[3]),
+				"margin_purchase_today_balance": parseInt(row[7]),
+				"margin_purchase_limit": parseInt(row[10]),
+				"short_sale_buy": parseInt(row[12]),
+				"short_sale_sell": parseInt(row[13]),
+				"short_sale_cash_repayment": parseInt(row[14]),
+				"short_sale_yesterday_balance": parseInt(row[11]),
+				"short_sale_today_balance": parseInt(row[15]),
+				"short_sale_limit": parseInt(row[18]),
+				"offset_loan_and_short": parseInt(row[19]),
+				"note": row[20],
+			}
+		for row in df.itertuples()}
 
 	def process(self, date):
-		datestr = date.strftime('%Y%m%d')
-		df = pandas.DataFrame()
-		self.tui.progress('fetching foreign at %s' % (datestr))
-		r = requests.post('http://www.twse.com.tw/fund/MI_QFIIS?response=csv&selectType=ALLBUT0999&date=' + datestr)
-		self.tui.done()
-		if not r.text:
-			print('no data')
-		else:
-			try:
-				self.tui.progress('transforming')
-				rows = [i.translate({ord(c): None for c in ' '}) for i in r.text.split('\n') if not i.startswith('="') and (i.count('",') in (11, 12))]
+		try:
+			indexMap = self.fetchIndex(date)
 
-				df = pandas.read_csv(StringIO("\n".join(rows)), header=1, na_filter=False)
-				self.tui.done()
-
-				if not df.empty:
-					self.tui.progress('insert stock')
-					self.db.insert_stock([{'id': row[1], 'name': row[2], 'level_id': 1} for row in df.itertuples()])
-					self.tui.done()
-
-					self.tui.progress('insert invester')
-					self.db.insert_invester([{
-						'stock_id': row[1],
-						'date': date,
-						'total_stock': parseInt(row[4]),
-						'valid_remain_for_foreign': parseInt(row[5]),
-						'hold_by_foreign': parseInt(row[6]),
-						'valid_remain_for_foreign_percent': parseFloat(row[7]),
-						'hold_by_foreign_percent': parseFloat(row[8]),
-						'hold_by_foreign_percent_max': parseFloat(row[9]),
-						'hold_by_china_percent_max': parseFloat(row[10]) if len(row) == 14 else parseFloat(row[9]),
-						'update_reason': row[11] if len(row) == 14 else row[10],
-						'update_date': parseTaiwanDate(row[12]) if len(row) == 14 else parseTaiwanDate(row[11]),
-					} for row in df.itertuples()])
-
-			except Exception as e:
-				print(e)
-				df.to_csv('%s.csv' % (datestr))
-				# with open('%s.csv' % (datestr), 'w') as f:
-				# 	f.write(r.text)
+			if indexMap is None:
 				return
+
+			for stockId, indexInfo in indexMap.items():
+				indexMap[stockId].update({c.name: None for c in DB.Trade.columns if c.name not in indexInfo})
+
+			for i in range(self.config["fetch_interval"]):
+				if not self.running:
+					return
+				self.tui.progress('sleeping', i, self.config["fetch_interval"])
+				time.sleep(1)
+
+			foreignMap = self.fetchForeign(date)
+			for stockId, foreignInfo in foreignMap.items():
+				if stockId not in indexMap:
+					print('no matching stock id: {}'.format(stockId,))
+					continue
+				indexMap[stockId].update(foreignInfo)
+
+			for i in range(self.config["fetch_interval"]):
+				if not self.running:
+					return
+				self.tui.progress('sleeping', i, self.config["fetch_interval"])
+				time.sleep(1)
+
+			marginMap = self.fetchMargin(date)
+			for stockId, marginInfo in marginMap.items():
+				if stockId not in indexMap:
+					print('no matching stock id: {}'.format(stockId,))
+					continue
+				indexMap[stockId].update(marginInfo)
+
+			self.db.insert_trade([info for info in indexMap.values()])
+		except Exception as e:
+			print(e)
+			# df.to_csv('%s.csv' % (datestr))
+			# with open('%s.csv' % (datestr), 'w') as f:
+			# 	f.write(r.text)
 
 		for i in range(self.config["fetch_interval"]):
 			if not self.running:
-				break
+				return
 			self.tui.progress('sleeping', i, self.config["fetch_interval"])
 			time.sleep(1)
 

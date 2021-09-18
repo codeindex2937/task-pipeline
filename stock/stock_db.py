@@ -38,19 +38,6 @@ class Trade(Base):
 	last_sell_price = Column(Float)
 	last_sell_amount = Column(Text)
 	pe_ratio = Column(Float)
-
-	def __iter__(self):
-		for c in self.__table__.c:
-			yield getattr(self, c.name)
-
-	def __repr__(self):
-		return '%s[%s]' % ('trade', ','.join('%s: %s' % (c.name, getattr(self, c.name)) for c in self.__table__.columns))
-
-
-class Invester(Base):
-	__tablename__ = 'invester'
-	stock_id = Column(Text, primary_key=True)
-	date = Column(Date, primary_key=True)
 	total_stock = Column(Integer)
 	valid_remain_for_foreign = Column(Integer)
 	hold_by_foreign = Column(Integer)
@@ -60,13 +47,27 @@ class Invester(Base):
 	hold_by_china_percent_max = Column(Float)
 	update_reason = Column(Text)
 	update_date = Column(Date)
+	margin_purchase_buy = Column(Integer)
+	margin_purchase_sell = Column(Integer)
+	margin_purchase_cash_repayment = Column(Integer)
+	margin_purchase_yesterday_balance = Column(Integer)
+	margin_purchase_today_balance = Column(Integer)
+	margin_purchase_limit = Column(Integer)
+	short_sale_buy = Column(Integer)
+	short_sale_sell = Column(Integer)
+	short_sale_cash_repayment = Column(Integer)
+	short_sale_yesterday_balance = Column(Integer)
+	short_sale_today_balance = Column(Integer)
+	short_sale_limit = Column(Integer)
+	offset_loan_and_short = Column(Integer)
+	note = Column(Text)
 
 	def __iter__(self):
 		for c in self.__table__.c:
 			yield getattr(self, c.name)
 
 	def __repr__(self):
-		return '%s[%s]' % ('invester', ','.join('%s: %s' % (c.name, getattr(self, c.name)) for c in self.__table__.columns))
+		return '%s[%s]' % ('trade', ','.join('%s: %s' % (c.name, getattr(self, c.name)) for c in self.__table__.columns))
 
 
 class Database(OrmBaseDatabase):
@@ -97,26 +98,32 @@ class Database(OrmBaseDatabase):
 		Trade.last_sell_price,
 		Trade.last_sell_amount,
 		Trade.pe_ratio,
-		Index('last_close_price', "date", "close_price"),
+		Trade.total_stock,
+		Trade.valid_remain_for_foreign,
+		Trade.hold_by_foreign,
+		Trade.valid_remain_for_foreign_percent,
+		Trade.hold_by_foreign_percent,
+		Trade.hold_by_foreign_percent_max,
+		Trade.hold_by_china_percent_max,
+		Trade.update_reason,
+		Trade.update_date,
+		Trade.margin_purchase_buy,
+		Trade.margin_purchase_sell,
+		Trade.margin_purchase_cash_repayment,
+		Trade.margin_purchase_yesterday_balance,
+		Trade.margin_purchase_today_balance,
+		Trade.margin_purchase_limit,
+		Trade.short_sale_buy,
+		Trade.short_sale_sell,
+		Trade.short_sale_cash_repayment,
+		Trade.short_sale_yesterday_balance,
+		Trade.short_sale_today_balance,
+		Trade.short_sale_limit,
+		Trade.offset_loan_and_short,
+		Trade.note,
 		Index('trade_daterange', "date", "stock_id"),
-		extend_existing=True
-	)
-	Invester = Table(
-		'invester',
-		Base.metadata,
-		Invester.stock_id,
-		Invester.date,
-		Invester.total_stock,
-		Invester.valid_remain_for_foreign,
-		Invester.hold_by_foreign,
-		Invester.valid_remain_for_foreign_percent,
-		Invester.hold_by_foreign_percent,
-		Invester.hold_by_foreign_percent_max,
-		Invester.hold_by_china_percent_max,
-		Invester.update_reason,
-		Invester.update_date,
+		Index('last_close_price', "date", "close_price"),
 		Index('hold_daterange', "date", "hold_by_foreign_percent"),
-		Index('invester_daterange', "date", "stock_id"),
 		extend_existing=True
 	)
 
@@ -124,5 +131,4 @@ class Database(OrmBaseDatabase):
 		super().__init__({
 			'stock': Stock.__table__,
 			'trade': Trade.__table__,
-			'invester': Invester.__table__,
 		}, Base)

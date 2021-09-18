@@ -15,9 +15,6 @@ class DB(stock_db.Database):
 	def insert_trade(self, attr):
 		return self.insert('trade', attr)
 
-	def insert_invester(self, attr):
-		return self.insert('invester', attr)
-
 	def get_stock(self, attr):
 		return self.fetchone('stock', attr)
 
@@ -32,10 +29,8 @@ class DB(stock_db.Database):
 		return [{'id': r[0], 'name': r[1]} for r in q.all()]
 
 	def list_trade(self, attr=dict(), extra=None):
-		return self.fetchall('trade', attr, order_by=stock_db.Trade.date.asc(), extra=extra)
-
-	def list_invester(self, attr=dict(), extra=None):
-		return self.fetchall('invester', attr, order_by=stock_db.Invester.date.asc(), extra=extra)
+		trades = self.fetchall('trade', attr, order_by=stock_db.Trade.date.asc(), extra=extra)
+		return [{c.name: t[i] for i, c in enumerate(self.Trade.columns)} for t in trades]
 
 	def get_trade_max_date(self, attr=dict()):
 		if 'stock_id' in attr:
@@ -46,14 +41,6 @@ class DB(stock_db.Database):
 			sql = 'SELECT coalesce(MAX(date), date("2021-01-01")) FROM trade'
 
 		cursor = self.conn.execute(sql)
-		return cursor.fetchone()[0]
-
-	def get_foreign_max_date(self, attr=dict()):
-		if attr:
-			where = 'WHERE ' + ' AND '.join(['{}={}'.format(k, v) for k, v in attr.items()])
-		else:
-			where = ''
-		cursor = self.conn.execute('SELECT coalesce(MAX(date), date("2021-01-01")) FROM invester ' + where)
 		return cursor.fetchone()[0]
 
 	def list_last_trade(self, attr=dict()):
@@ -199,8 +186,6 @@ class DbService(ServiceWorker):
 			return self.request(['get_foreign_max_date', attr], no_wait=False)
 		def insert_trade(self, attr):
 			return self.request(['insert_trade', attr], no_wait=False)
-		def insert_invester(self, attr):
-			return self.request(['insert_invester', attr], no_wait=False)
 		def insert_stock(self, attr):
 			return self.request(['insert_stock', attr], no_wait=False)
 		def list_stock(self, attr=dict()):
@@ -213,8 +198,6 @@ class DbService(ServiceWorker):
 			return self.request(['get_stock', attr], no_wait=False)
 		def insert_relation(self, attr):
 			return self.request(['insert_relation', attr], no_wait=False)
-		def list_invester(self, attr, extra=None):
-			return self.request(['list_invester', attr, extra], no_wait=False)
 		def update_exclusive_tag(self, stock_id, tag, exclusive_tags):
 			return self.request(['update_exclusive_tag', stock_id, tag, exclusive_tags], no_wait=False)
 		def set_tag(self, stock_id, tag):
