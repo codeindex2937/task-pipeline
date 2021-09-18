@@ -5,80 +5,25 @@ from sqlalchemy.ext.declarative import declarative_base, DeferredReflection
 from sqlalchemy.orm import sessionmaker, mapper
 from sqlalchemy.sql import and_, text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import MetaData, Table, Column, Index
+from sqlalchemy import Table, Column, Index
 from sqlalchemy import Integer, Text, Float, DateTime, Date
 from sqlalchemy.inspection import inspect
+import sqlite3
 
-class OrmDatabase:
-	metadata = None
-	table_dict = None
-	record = None
-
-	def __init__(self, schema):
+class OrmBaseDatabase:
+	def __init__(self, table_dict, base):
+		self.base = base
 		self.engine = None
 		self.conn = None
 		self.session = None
-		self.generate_table(schema)
-
-	@classmethod
-	def generate_table(cls, schema):
-		Base = declarative_base()
-		type_map = {
-			'TEXT': Text,
-			'INT': Integer,
-			'INTEGER': Integer,
-			'DATETIME': DateTime,
-			'DATE': Date,
-			'FLOAT': Float,
-			'REAL': Float,
-		}
-
-		cls.metadata = MetaData()
-		cls.table_dict = {}
-		cls.record = type('record_dict', (), {})()
-		for name, config in schema.items():
-			if not any(col['attr'].get('primary_key', False) for col in config['columns']):
-				config['columns'].insert(0, { 'name': 'id', 'type': 'INT', 'attr': { 'primary_key': True } })
-			cls.table_dict[name] = Table(
-					name,
-					cls.metadata,
-					*[Column(
-						column_desc['name'],
-						type_map[column_desc['type']],
-						**column_desc['attr']
-					) for column_desc in config['columns']],
-					*[Index(
-						index_desc['name'],
-						*index_desc['columns']
-					) for index_desc in config.get('index', [])],
-					extend_existing=True
-				)
-
-			def init(self,*arg,**kwargs):
-				for k,v in kwargs.items():
-					setattr(self, k, v)
-
-			def key_iter(self):
-				for c in self.__table__.c:
-					yield c.name, getattr(self, c.name)
-
-			basic_attr = {
-				'__tablename__': name,
-				'__table__': cls.table_dict[name],
-				'__repr__': lambda self: '%s[%s]' % (name, ','.join('%s: %s' % (c.name, getattr(self, c.name)) for c in self.__table__.columns)),
-				'__iter__': key_iter,
-				'__init__': init
-			}
-			basic_attr.update({c.name: None for c in cls.table_dict[name].columns})
-			setattr(cls.record, name, type(name, (Base,DeferredReflection), basic_attr))
-			mapper(getattr(cls.record, name), cls.table_dict[name])
+		self.table_dict = table_dict
 
 	def connect(self, db_path, app=None):
 		DB_CONNECT_STRING = 'sqlite:///' + db_path
 		if app is None:
 			self.engine = create_engine(DB_CONNECT_STRING, echo=False)
 			self.conn = self.engine.connect()
-			self.metadata.create_all(bind=self.engine)
+			self.base.metadata.create_all(bind=self.engine)
 			self.session = sessionmaker(bind=self.engine)()
 		else:
 			app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -181,3 +126,64 @@ class OrmDatabase:
 			self.session.commit()
 		except sqlite3.Error as e:
 			print(e)
+
+
+class AutoDatabase(OrmBaseDatabase):
+	def __init__(self, schema):
+		base, table_dict, record = self.generate_table(schema)
+		super().__init__(table_dict, base)
+		self.base = base
+		self.record = record
+
+	@staticmethod
+	def generate_table(schema):
+		base = declarative_base()
+		type_map = {
+			'TEXT': Text,
+			'INT': Integer,
+			'INTEGER': Integer,
+			'DATETIME': DateTime,
+			'DATE': Date,
+			'FLOAT': Float,
+			'REAL': Float,
+		}
+
+		table_dict = {}
+		record = type('record_dict', (), {})()
+		for name, config in schema.items():
+			if not any(col['attr'].get('primary_key', False) for col in config['columns']):
+				config['columns'].insert(0, { 'name': 'id', 'type': 'INT', 'attr': { 'primary_key': True } })
+			table_dict[name] = Table(
+					name,
+					base.metadata,
+					*[Column(
+						column_desc['name'],
+						type_map[column_desc['type']],
+						**column_desc['attr']
+					) for column_desc in config['columns']],
+					*[Index(
+						index_desc['name'],
+						*index_desc['columns']
+					) for index_desc in config.get('index', [])],
+					extend_existing=True
+				)
+
+			def init(self,*arg,**kwargs):
+				for k,v in kwargs.items():
+					setattr(self, k, v)
+
+			def key_iter(self):
+				for c in self.__table__.c:
+					yield c.name, getattr(self, c.name)
+
+			basic_attr = {
+				'__tablename__': name,
+				'__table__': table_dict[name],
+				'__repr__': lambda self: '%s[%s]' % (name, ','.join('%s: %s' % (c.name, getattr(self, c.name)) for c in self.__table__.columns)),
+				'__iter__': key_iter,
+				'__init__': init
+			}
+			basic_attr.update({c.name: None for c in table_dict[name].columns})
+			setattr(record, name, type(name, (base, DeferredReflection), basic_attr))
+			mapper(getattr(record, name), table_dict[name])
+		return base, table_dict, record

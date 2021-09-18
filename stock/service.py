@@ -1,66 +1,14 @@
 from ..pipeline.service import ServiceWorker
-from ..utils.db import OrmDatabase
 from ..utils.tui import TextUserInterface
+from . import stock_db
+from . import analyze_db
+
 import sys
 import traceback
 import math
 from sqlalchemy import func, select, or_
 
-class DB(OrmDatabase):
-	def __init__(self):
-		super(DB, self).__init__({
-		'stock': {
-			'columns': [
-				{ 'name': 'id',       'type': 'TEXT',    'attr': { 'primary_key': True, 'unique': True} },
-				{ 'name': 'name',     'type': 'TEXT',    'attr': {} },
-				{ 'name': 'level_id', 'type': 'INTEGER', 'attr': {} },
-			]
-		},
-		'trade': {
-			'index': [
-				{ 'name': 'last_close_price', 'columns': ('date', 'close_price')},
-				{ 'name': 'trade_daterange',  'columns': ('date', 'stock_id')},
-			],
-			'columns': [
-				{ 'name': 'stock_id',             'type': 'TEXT',     'attr': { 'primary_key': True } },
-				{ 'name': 'date',                 'type': 'DATE',     'attr': { 'primary_key': True } },
-				{ 'name': 'share_amount',         'type': 'INTEGER',  'attr': {} },
-				{ 'name': 'transaction_amount',   'type': 'INTEGER',  'attr': {} },
-				{ 'name': 'turnover',             'type': 'INTEGER',  'attr': {} },
-				{ 'name': 'open_price',           'type': 'REAL',     'attr': { 'nullable': True } },
-				{ 'name': 'close_price',          'type': 'REAL',     'attr': { 'nullable': True } },
-				{ 'name': 'lowest_price',         'type': 'REAL',     'attr': { 'nullable': True } },
-				{ 'name': 'highest_price',        'type': 'REAL',     'attr': { 'nullable': True } },
-				{ 'name': 'ud',                   'type': 'TEXT',     'attr': {} },
-				{ 'name': 'ud_amount',            'type': 'REAL',     'attr': {} },
-				{ 'name': 'last_purchase_price',  'type': 'REAL',     'attr': { 'nullable': True } },
-				{ 'name': 'last_purchase_amount', 'type': 'INT',      'attr': { 'nullable': True } },
-				{ 'name': 'last_sell_price',      'type': 'REAL',     'attr': { 'nullable': True } },
-				{ 'name': 'last_sell_amount',     'type': 'TEXT',     'attr': { 'nullable': True } },
-				{ 'name': 'pe_ratio',             'type': 'REAL',     'attr': { 'nullable': True } },
-			]
-		},
-		'invester': {
-			'index': [
-				{ 'name': 'hold_daterange',     'columns': ('date', 'hold_by_foreign_percent')},
-				{ 'name': 'invester_daterange', 'columns': ('date', 'stock_id')},
-			],
-			'columns': [
-				{ 'name': 'stock_id', 'type': 'TEXT', 'attr': { 'primary_key': True } },
-				{ 'name': 'date', 'type': 'DATE', 'attr': { 'primary_key': True } },
-				{ 'name': 'total_stock', 'type': 'INT', 'attr': {} },
-				{ 'name': 'valid_remain_for_foreign', 'type': 'INT', 'attr': {} },
-				{ 'name': 'hold_by_foreign', 'type': 'INT', 'attr': {} },
-				{ 'name': 'valid_remain_for_foreign_percent', 'type': 'FLOAT', 'attr': {} },
-				{ 'name': 'hold_by_foreign_percent', 'type': 'FLOAT', 'attr': {} },
-				{ 'name': 'hold_by_foreign_percent_max', 'type': 'FLOAT', 'attr': {} },
-				{ 'name': 'hold_by_china_percent_max', 'type': 'FLOAT', 'attr': {} },
-				{ 'name': 'update_reason', 'type': 'TEXT', 'attr': {} },
-				{ 'name': 'update_date', 'type': 'DATE', 'attr': {} },
-			]
-		},
-	})
-
+class DB(stock_db.Database):
 	def insert_stock(self, attr):
 		return self.insert('stock', attr)
 
@@ -80,14 +28,14 @@ class DB(OrmDatabase):
 		return self.fetchall('stock', attr)
 
 	def list_fetched_stock(self, attr=dict()):
-		q = self.session.query(self.record.trade.stock_id, self.record.stock.name).distinct().outerjoin(self.record.stock, self.record.stock.id==self.record.trade.stock_id)
+		q = self.session.query(stock_db.Trade.stock_id, stock_db.Stock.name).distinct().outerjoin(stock_db.Stock, stock_db.Stock.id==stock_db.Trade.stock_id)
 		return [{'id': r[0], 'name': r[1]} for r in q.all()]
 
 	def list_trade(self, attr=dict(), extra=None):
-		return self.fetchall('trade', attr, order_by=self.record.trade.date.asc(), extra=extra)
+		return self.fetchall('trade', attr, order_by=stock_db.Trade.date.asc(), extra=extra)
 
 	def list_invester(self, attr=dict(), extra=None):
-		return self.fetchall('invester', attr, order_by=self.record.invester.date.asc(), extra=extra)
+		return self.fetchall('invester', attr, order_by=stock_db.Invester.date.asc(), extra=extra)
 
 	def get_trade_max_date(self, attr=dict()):
 		if 'stock_id' in attr:
@@ -109,50 +57,30 @@ class DB(OrmDatabase):
 		return cursor.fetchone()[0]
 
 	def list_last_trade(self, attr=dict()):
-		cls = self.__class__
-		stmt = self.append_where(cls.table_dict['trade'].columns, cls.table_dict['trade'].select(), attr, fields=['stock_id'], additional_where = 'date = (SELECT MAX(date) FROM trade)')
+		stmt = self.append_where(self.Trade.columns, self.Trade.select(), attr, fields=['stock_id'], additional_where = 'date = (SELECT MAX(date) FROM trade)')
 		result = self.session.execute(stmt)
 		return result.fetchall()
 
 	def list_trade_on(self, date):
-		cls = self.__class__
-		stmt = self.append_where(cls.table_dict['trade'].columns, cls.table_dict['trade'].select(), {'date': date}, fields=['stock_id', 'date'])
+		stmt = self.append_where(self.Trade.columns, self.Trade.select(), {'date': date}, fields=['stock_id', 'date'])
 		result = self.session.execute(stmt)
 		return result.fetchall()
 
 	def list_trade_count(self, attr=dict()):
-		cls = self.__class__
-		col_stock_id = cls.table_dict['trade'].columns.stock_id
-		stmt = select([col_stock_id, func.count()]).select_from(cls.table_dict['trade']).group_by(col_stock_id)
+		col_stock_id = self.Trade.columns.stock_id
+		stmt = select([col_stock_id, func.count()]).select_from(self.Trade).group_by(col_stock_id)
 		result = self.session.execute(stmt)
 		return result.fetchall()
 
-class AnalyzeDB(OrmDatabase):
-	def __init__(self):
-		super(AnalyzeDB, self).__init__({
-		'tag': {
-			'columns': [
-				{ 'name': 'tag_id', 'type': 'INTEGER', 'attr': { 'primary_key': True } },
-				{ 'name': 'tag', 'type': 'TEXT', 'attr': {} },
-				{ 'name': 'parent_tag', 'type': 'INTEGER', 'attr': {} },
-			]
-		},
-		'stock_tag': {
-			'columns': [
-				{ 'name': 'stock_id', 'type': 'TEXT', 'attr': { 'primary_key': True } },
-				{ 'name': 'tag_id', 'type': 'INTEGER', 'attr': { 'primary_key': True } },
-			]
-		},
-	})
-
+class AnalyzeDB(analyze_db.Database):
 	def list_by_tag(self, *ids):
-		filters = or_(*[self.record.stock_tag.tag_id==i for i in ids])
+		filters = or_(*[analyze_db.StockTag.tag_id==i for i in ids])
 
-		subq = self.session.query(self.record.stock_tag.stock_id) \
+		subq = self.session.query(analyze_db.StockTag.stock_id) \
 			.filter(filters).subquery()
-		q = self.session.query(self.record.stock_tag.stock_id, self.record.tag.tag, self.record.tag.parent_tag) \
-			.join(self.record.tag, self.record.tag.tag_id==self.record.stock_tag.tag_id) \
-			.filter(self.record.stock_tag.stock_id.in_(subq))
+		q = self.session.query(analyze_db.StockTag.stock_id, analyze_db.Tag.tag, analyze_db.Tag.parent_tag) \
+			.join(analyze_db.Tag, analyze_db.Tag.tag_id==analyze_db.StockTag.tag_id) \
+			.filter(analyze_db.StockTag.stock_id.in_(subq))
 
 		result = {}
 		for r in q.all():
@@ -167,27 +95,27 @@ class AnalyzeDB(OrmDatabase):
 			} for v in result.values()]
 
 	def set_tag(self, stock_id, symbol):
-		subq = self.session.query(stock_id, self.record.tag.tag_id).filter(self.record.tag.tag==symbol).subquery()
-		ins = self.table_dict['stock_tag'].insert(prefixes=['OR IGNORE']).from_select(
-			[self.record.stock_tag.stock_id, self.record.stock_tag.tag_id],
+		subq = self.session.query(stock_id, analyze_db.Tag.tag_id).filter(analyze_db.Tag.tag==symbol).subquery()
+		ins = self.StockTag.insert(prefixes=['OR IGNORE']).from_select(
+			[analyze_db.StockTag.stock_id, analyze_db.StockTag.tag_id],
 			subq
 		)
 		self.session.execute(ins)
 		self.session.commit()
 
 	def reset_tag(self, stock_id, symbol):
-		subq = self.session.query(self.record.tag.tag_id).filter(self.record.tag.tag==symbol).subquery()
-		ins = self.table_dict['stock_tag'].delete().where(
-			(self.record.stock_tag.stock_id==stock_id) & (self.record.stock_tag.tag_id==subq)
+		subq = self.session.query(analyze_db.Tag.tag_id).filter(analyze_db.Tag.tag==symbol).subquery()
+		ins = self.StockTag.delete().where(
+			(analyze_db.StockTag.stock_id==stock_id) & (analyze_db.StockTag.tag_id==subq)
 		)
 		self.session.execute(ins)
 		self.session.commit()
 
 	def list_tag(self):
-		parent_filter = or_((self.record.tag.parent_tag==1), (self.record.tag.parent_tag==2), (self.record.tag.parent_tag==None))
-		q = self.session.query(self.record.tag.tag_id, self.record.tag.tag, self.record.tag.parent_tag) \
+		parent_filter = or_((analyze_db.Tag.parent_tag==1), (analyze_db.Tag.parent_tag==2), (analyze_db.Tag.parent_tag==None))
+		q = self.session.query(analyze_db.Tag.tag_id, analyze_db.Tag.tag, analyze_db.Tag.parent_tag) \
 			.filter(parent_filter) \
-			.filter((self.record.tag.tag != '概念股') & (self.record.tag.tag != '上市') & (self.record.tag.tag != '上櫃') & (self.record.tag.tag != '電子產業'))
+			.filter((analyze_db.Tag.tag != '概念股') & (analyze_db.Tag.tag != '上市') & (analyze_db.Tag.tag != '上櫃') & (analyze_db.Tag.tag != '電子產業'))
 
 		return [{
 			'tag_id': r[0],
@@ -196,38 +124,38 @@ class AnalyzeDB(OrmDatabase):
 		} for r in q.all()]
 
 	def list_tag_of_stock(self, stock_id):
-		q = self.session.query(self.record.tag.tag).select_from(self.table_dict['tag']) \
-			.join(self.record.stock_tag, self.record.stock_tag.tag_id==self.record.tag.tag_id) \
-			.filter(self.record.stock_tag.stock_id==stock_id)
+		q = self.session.query(analyze_db.Tag.tag).select_from(self.table_dict['tag']) \
+			.join(analyze_db.StockTag, analyze_db.StockTag.tag_id==analyze_db.Tag.tag_id) \
+			.filter(analyze_db.StockTag.stock_id==stock_id)
 		return [r[0] for r in q.all()]
 
 	def update_stock_tag(self, stock_id, tag):
-		tags = self.session.query(self.record.tag).filter(or_(*[self.record.tag.tag==symbol for symbol in ('rising', 'jitter', 'falling')])).all()
+		tags = self.session.query(analyze_db.Tag).filter(or_(*[analyze_db.Tag.tag==symbol for symbol in ('rising', 'jitter', 'falling')])).all()
 		new_tag = list(filter(lambda r: r.tag==tag, tags))[0]
 
-		filters = or_(*[self.record.stock_tag.tag_id==tag.tag_id for tag in tags])
-		q = self.session.query(self.record.stock_tag)
+		filters = or_(*[analyze_db.StockTag.tag_id==tag.tag_id for tag in tags])
+		q = self.session.query(analyze_db.StockTag)
 		q.filter_by(stock_id=stock_id).filter(filters).delete()
 
-		ins = self.table_dict['stock_tag'].insert().values(stock_id=stock_id, tag_id=new_tag.tag_id)
+		ins = self.StockTag.insert().values(stock_id=stock_id, tag_id=new_tag.tag_id)
 		self.session.execute(ins)
 		self.session.commit()
 
 	def update_exclusive_tag(self, stock_id, tag, exclusive_tags, parent=None):
-		req = self.session.query(self.record.tag)
+		req = self.session.query(analyze_db.Tag)
 		
 		if parent is not None:
-			subq = self.session.query(self.record.tag.tag_id).filter(self.record.tag.tag==parent).subquery()
-			req = req.filter(self.record.tag.parent_tag==subq)
+			subq = self.session.query(analyze_db.Tag.tag_id).filter(analyze_db.Tag.tag==parent).subquery()
+			req = req.filter(analyze_db.Tag.parent_tag==subq)
 
-		tags = req.filter(or_(*[self.record.tag.tag==symbol for symbol in exclusive_tags])).all()
+		tags = req.filter(or_(*[analyze_db.Tag.tag==symbol for symbol in exclusive_tags])).all()
 		new_tag = list(filter(lambda r: r.tag==tag, tags))[0]
 
-		filters = or_(*[self.record.stock_tag.tag_id==tag.tag_id for tag in tags])
-		q = self.session.query(self.record.stock_tag)
+		filters = or_(*[analyze_db.StockTag.tag_id==tag.tag_id for tag in tags])
+		q = self.session.query(analyze_db.StockTag)
 		q.filter_by(stock_id=stock_id).filter(filters).delete()
 
-		ins = self.table_dict['stock_tag'].insert().values(stock_id=stock_id, tag_id=new_tag.tag_id)
+		ins = self.StockTag.insert().values(stock_id=stock_id, tag_id=new_tag.tag_id)
 		self.session.execute(ins)
 		self.session.commit()
 
