@@ -410,16 +410,15 @@ class SingleForeignFetcher(SimpleWorker):
 class StockEnumerator(SimpleWorker):
 	def process(self, dummy):
 		db = ServiceManager.get(self.config['db'])
-		stock_list = db.list_stock_with_groups()
+		stock_list = db.list_stock()
 		last_trade_date = max([trade['date'] for trade in db.list_last_trade()])
 		since = last_trade_date + timedelta(days=-120)
 		date_filter = "date BETWEEN '{}' AND '{}'".format(datetime.strftime(since, '%Y-%m-%d'), datetime.strftime(last_trade_date, '%Y-%m-%d'))
 
 		for stock in stock_list:
 			self.output({
-				'id': stock['stock_id'],
-				'name': stock['stock_name'],
-				'group': stock['group'],
+				'id': stock['id'],
+				'name': stock['name'],
 				'date_filter': date_filter,
 			})
 
@@ -519,7 +518,7 @@ class TrendTagUpdater(SimpleWorker):
 class RecordTagUpdater(SimpleWorker):
 	def on_start(self):
 		db = ServiceManager.get(self.config['db'])
-		self.trades_map, _ = parseTrades('stock/trades.txt', db)
+		self.trades_map, _ = parseTrades('trades.txt', db)
 
 	def process(self, data):
 		stock_id = data['id']
@@ -531,7 +530,7 @@ class RecordTagUpdater(SimpleWorker):
 class AppCacheWriter(SimpleWorker):
 	def on_start(self):
 		db = ServiceManager.get(self.config['db'])
-		self.trades_map, _ = parseTrades('stock/trades.txt', db)
+		self.trades_map, _ = parseTrades('trades.txt', db)
 
 	def process(self, data):
 		stock_id = data['id']
